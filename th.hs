@@ -5,10 +5,11 @@ module Main where
 import System.Random
 import System.IO
 import Control.Monad
+import Control.Applicative
 import Data.List
 --import Text.Peggy
 
-data TaskState = NotDone | Started | Done 
+data TaskState = NotDone | Started | Done
 	deriving (Eq)
 
 instance Show TaskState where
@@ -18,16 +19,16 @@ instance Show TaskState where
 
 instance Read TaskState where
 	readsPrec d ['[', x, ']'] =
-		case x of 
+		case x of
 			' ' -> [(NotDone, "")]
-			'+' -> [(Started, "")]
+			'~' -> [(Started, "")]
 			'X' -> [(Done, "")]
 
 data Task = Task {identifier :: Int, name :: String, state :: TaskState}
 	deriving (Read)
 
 instance Show Task where
-	show (Task _ name state) = show state ++ " " ++ name 
+	show (Task _ name state) = show state ++ " " ++ name
 
 instance Eq Task where
 	(==) (Task identifier1 _ _) (Task identifier2 _ _) = identifier1 == identifier2
@@ -35,7 +36,9 @@ instance Eq Task where
 
 type TaskList = [Task]
 instance Show TaskList where
-	show (xs) = concat $ intersperse ('\n':"") $ map show xs
+	show (xs) = concat $ intersperse ("\n") $ map show xs
+        -- show (x:xs) = foldr (\x y -> concat [x, "\n", show y]) x xs
+        -- me gustan demasiado los fold :D
 
 -------------------------------------------------------------------------------
 
@@ -52,15 +55,21 @@ createTask name = do
 		return $ Task identifier name NotDone
 
 
-finishTask :: Task -> Task
-finishTask (Task identifier name state) = Task identifier name Done
+-- | Como termino una tarea segun pos
+finishTask :: [Task] -> Int -> [Task]
+finishTask (x:[]) i | i == 1 = [x { state = Done }]
+                    | otherwise = [x]
+finishTask (x:xs) 1 = x { state = Done } : xs
+finishTask (x:xs) i | i > 0     = x : finishTask xs (i-1)
+                    | otherwise = x:xs
 
-deleteTask :: Task -> [Task] -> [Task]
-deleteTask task = filter (/= task)
+-- | como elimino segun identifier -- no funciona actualmente
+deleteTask :: [Task] -> Int -> [Task]
+deleteTask t i = filter ((/= i) . identifier) t
 
 -------------------------------------------------------------------------------
 
-data Command = Create | Finish | Delete | Print | Exit | Unrecognized 
+data Command = Create | Finish | Delete | Print | Exit | Unrecognized
 	deriving (Read, Show)
 
 readCommand :: String -> Command
@@ -77,7 +86,6 @@ readCommand "d"      = Finish
 readCommand "exit"   = Exit
 readCommand "e"      = Exit
 
-
 readCommand "print"  = Print
 readCommand "p"      = Print
 
@@ -86,25 +94,15 @@ readCommand _        = Unrecognized
 
 executeCommand :: Command -> [Task] -> IO [Task]
 
-executeCommand Unrecognized list = do
-	putStrLn "Unrecognized Command"
-	return list
+executeCommand Unrecognized list = putStrLn "Unrecognized Command" >> return list
 
-executeCommand Create list = do
-	name <- prompt "Task name: "
-	task <- createTask name
-	return $ task:list
+executeCommand Create list = return (:list) <*> (prompt "Task name: " >>= createTask)
 
+executeCommand Finish list = (finishTask list . read) <$> prompt "Task Number: "
 
---executeCommand Finish list = do
---	putStr "Task number: "
---	number <- getLine
---	task   <- createTask name
---	return $ task:list
+executeCommand Delete list = (deleteTask list . read) <$> prompt "Task Number: "
 
-executeCommand Print list = do
-	printList list
-	return list
+executeCommand Print list = printList list >> return list
 
 executeCommand _ list = return list
 
@@ -130,7 +128,7 @@ repl list = do
 	input <- prompt "> "
 	putStrLn ""
 	let command = readCommand input
-	case command of 
+	case command of
 		Exit 	-> return list
 		_ 		-> do
 			list' <- executeCommand command list
