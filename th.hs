@@ -5,10 +5,12 @@ module Main where
 import System.Console.GetOpt
 import System.IO
 import Control.Monad
+import Control.Applicative
 import Data.List
 import System.Environment
 import System.Directory
 import Control.Monad.Error
+import qualified Data.IntMap as H
 
 data TaskState = NotDone | Started | Done deriving (Eq)
 
@@ -22,47 +24,38 @@ data Task = Task {state :: TaskState, name :: String} deriving (Eq)
 instance Show Task where
 	show (Task state name) = show state ++ " " ++ name
 
-type TaskList = [Task]
-type TaskID = Int
+type TaskList = H.IntMap Task
+type TaskID   = H.Key 
 
 instance Show TaskList where
-	show (xs) = intercalate "\n" $ map show xs
+	show (xs) = H.fold (++) "" $ H.map (++ "\n") $ H.map show xs
 
-parseTask :: String -> Either String Task
-parseTask ('[':' ':']':' ':name) = Right $ Task NotDone name
-parseTask ('[':'-':']':' ':name) = Right $ Task Started name
-parseTask ('[':'x':']':' ':name) = Right $ Task Done name
-parseTask _                      = Left "Bad format"
+parseTask :: String -> Maybe Task
+parseTask ('[':' ':']':' ':name) = Just $ Task NotDone  name
+parseTask ('[':'-':']':' ':name) = Just $ Task Started  name
+parseTask ('[':'x':']':' ':name) = Just $ Task Done     name
+parseTask _                      = Nothing
 
-parseTaskList' :: [String] -> TaskList -> Either String TaskList
-parseTaskList' [] x = Right x
-parseTaskList' (x:xs) tasks = parseTask x >>= parseTaskList' xs . (append tasks)
-	where append xs x = xs ++ [x]
+parseTaskList ::  String -> Maybe TaskList
+parseTaskList = mapM parseTask . filter (not . null) . lines >=> (Just . H.fromList . zip [1..])
 
-parseTaskList :: String -> Either String TaskList
-parseTaskList str = parseTaskList' (lines str) []
+-----------------------------------------------------------------------------------
 
----------------------------------------------------------------------------------
+findIndex' :: H.IntMap a -> H.Key
+findIndex' xs = if H.null xs then 1 else (+) 1 $ fst $ H.findMax xs
 
 createTask ::  String -> TaskList -> TaskList
-createTask name list = Task NotDone name :list
+createTask name list = H.insert (findIndex' list) (Task NotDone name) list
 
-markTask :: TaskState -> TaskID -> TaskList -> TaskList
-markTask st 1 (x:xs)  = x { state = st } : xs
-markTask st i (x:xs) 	| i > 1     = x : markTask st (i-1) xs 
-						| otherwise = x:xs
-markTask _ _ list = list
+markTask :: TaskState -> H.Key -> TaskList -> TaskList
+markTask s = H.update $ \ task -> Just task {state = s}
 
-startTask, finishTask, deleteTask ::  TaskID -> TaskList -> TaskList
+startTask, finishTask, deleteTask :: H.Key -> TaskList -> TaskList
 startTask  = markTask Started
 finishTask = markTask Done
+deleteTask = H.update $ const Nothing
 
-deleteTask 1 (x:xs) = xs
-deleteTask i (x:xs)	| i > 1     = x : deleteTask (i-1) xs
-					| otherwise = x:xs
-deleteTask _ list = list
-
----------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------
 
 data Action = Create String | Start TaskID | Finish TaskID | Delete TaskID | Print deriving Show
 
@@ -73,42 +66,21 @@ executeAction (Finish id)   = finishTask id
 executeAction (Delete id)   = deleteTask id
 executeAction _             = id
 
----------------------------------------------------------------------------------
-
-printList :: TaskList -> IO ()
-printList list = mapM_ printListItem $ zip [1..] list
-
-printListItem :: (Int,Task) -> IO()
-printListItem (n, t) = putStrLn $ show n ++ " - " ++ show t
-
----------------------------------------------------------------------------------
-
-processResult :: Options -> Either String TaskList -> IO ()
-processResult _ (Left str)          = putStrLn str
-processResult options (Right tasks) = printList tasks >> (writeFile  (file options) (show tasks))
-
-parseIfExists' :: String -> Bool -> IO (Either String TaskList)
-parseIfExists' _ False       = return (Right [])
-parseIfExists' filename True = fmap parseTaskList $ readFile filename
-
-parseIfExists :: String -> IO (Either String TaskList)
-parseIfExists filename = doesFileExist filename >>= parseIfExists' filename
-
----------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------
 
 data Options = Options
-	{ help :: Bool
+	{ help    :: Bool
 	, version :: Bool
-	, action :: Action
-	, file :: String
+	, action  :: Action
+	, file    :: String
 	} deriving Show
 
 defaultOptions :: Options
 defaultOptions = Options 
-	{ help = False
+	{ help    = False
 	, version = False
-	, action = Print
-	, file = "todo.txt"
+	, action  = Print
+	, file    = "todo.txt"
 	}
 
 options :: [ OptDescr (Options -> Options)]
@@ -148,7 +120,15 @@ parseOptions argv = case getOpt Permute options argv of
 		(_, _, errors) 	-> Left $ concat errors ++ usageInfo header options
 	where header = "\n\nUsage: th [OPTION...]"
 
----------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+
+processResult :: Options -> Maybe TaskList -> IO ()
+processResult options Nothing      = putStrLn $ "Error parsing" ++ file options
+processResult options (Just tasks) = print tasks >> writeFile (file options) (show tasks)
+
+parseIfExists :: String -> IO (Maybe TaskList)
+parseIfExists filename = doesFileExist filename >> parseTaskList <$> readFile filename
+
 
 main :: IO ()
 main = do
@@ -156,5 +136,5 @@ main = do
 	case parseOptions args of 
 		Left str -> putStrLn str
 		Right options -> do
-			taskList <- parseIfExists $ file options
-			processResult options $ taskList >>= (Right . executeAction (action options))
+			mTaskList <- parseIfExists $ file options
+			processResult options $ mTaskList >>= Just . executeAction (action options)
