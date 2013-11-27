@@ -4,12 +4,12 @@ module Main where
 
 import System.Console.GetOpt
 import System.IO
+import System.Environment
+import System.Directory
 import Control.Monad
 import Control.Applicative
 import Data.List
-import System.Environment
-import System.Directory
-import Control.Monad.Error
+
 import qualified Data.IntMap as H
 
 data TaskState = NotDone | Started | Done deriving (Eq)
