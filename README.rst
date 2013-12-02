@@ -9,7 +9,7 @@ Installing th
 
 `th` requires `Haskell Platform`_ and a UNIX-like shell (I use zsh). It may work on Linux, OS X and Windows (using Cygwin_).
 
-Once you have installed `Haskell Platform`_, you have to `download <https://github.com/damianfral/th/archive/master.zip>` the latest version or clone the repository using git, `git clone https://github.com/damianfral/th.git`.
+Once you have installed `Haskell Platform`_, you have to `download <https://github.com/damianfral/th/archive/master.zip>`_ the latest version or clone the repository using git, `git clone https://github.com/damianfral/th.git`.
 
 .. _`Haskell Platform`: http://www.haskell.org/platform/index.html
 .. _Cygwin: http://www.cygwin.com/
