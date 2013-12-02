@@ -3,14 +3,19 @@
 module Main where
 
 import System.Console.GetOpt
-import System.IO
 import System.Environment
 import System.Directory
 import Control.Monad
 import Control.Applicative
-import Data.List
-
+import Data.Either()
 import qualified Data.IntMap as H
+
+_version :: String
+_version = "v0.2"
+
+if' :: Bool -> a -> a -> a
+if' True x _  = x
+if' False _ y = y
 
 data TaskState = NotDone | Started | Done deriving (Eq)
 
@@ -22,7 +27,7 @@ instance Show TaskState where
 data Task = Task {state :: TaskState, name :: String} deriving (Eq)
 
 instance Show Task where
-	show (Task state name) = show state ++ " " ++ name
+	show (Task taskState taskName) = show taskState ++ " " ++ taskName
 
 type TaskList = H.IntMap Task
 type TaskID   = H.Key 
@@ -30,14 +35,14 @@ type TaskID   = H.Key
 instance Show TaskList where
 	show (xs) = H.fold (++) "" $ H.map (++ "\n") $ H.map show xs
 
-parseTask :: String -> Maybe Task
-parseTask ('[':' ':']':' ':name) = Just $ Task NotDone  name
-parseTask ('[':'-':']':' ':name) = Just $ Task Started  name
-parseTask ('[':'x':']':' ':name) = Just $ Task Done     name
-parseTask _                      = Nothing
+parseTask :: String -> Either String Task
+parseTask ('[':' ':']':' ':taskName) = Right $ Task NotDone  taskName
+parseTask ('[':'-':']':' ':taskName) = Right $ Task Started  taskName
+parseTask ('[':'x':']':' ':taskName) = Right $ Task Done     taskName
+parseTask str                    	 = Left  $ "Error parsing: " ++ str
 
-parseTaskList ::  String -> Maybe TaskList
-parseTaskList = mapM parseTask . filter (not . null) . lines >=> (Just . H.fromList . zip [1..])
+parseTaskList :: String -> Either String TaskList
+parseTaskList = mapM parseTask . filter (not . null) . lines >=> (Right . H.fromList . zip [1..])
 
 -----------------------------------------------------------------------------------
 
@@ -45,7 +50,7 @@ findIndex' :: H.IntMap a -> H.Key
 findIndex' xs = if H.null xs then 1 else (+) 1 $ fst $ H.findMax xs
 
 createTask ::  String -> TaskList -> TaskList
-createTask name list = H.insert (findIndex' list) (Task NotDone name) list
+createTask taskName list = H.insert (findIndex' list) (Task NotDone taskName) list
 
 markTask :: TaskState -> H.Key -> TaskList -> TaskList
 markTask s = H.update $ \ task -> Just task {state = s}
@@ -60,11 +65,11 @@ deleteTask = H.update $ const Nothing
 data Action = Create String | Start TaskID | Finish TaskID | Delete TaskID | Print deriving Show
 
 executeAction :: Action -> TaskList -> TaskList
-executeAction (Create name) = createTask name
-executeAction (Start id)    = startTask id
-executeAction (Finish id)   = finishTask id
-executeAction (Delete id)   = deleteTask id
-executeAction _             = id
+executeAction (Create taskName) = createTask taskName
+executeAction (Start  taskId)   = startTask taskId
+executeAction (Finish taskId)   = finishTask taskId
+executeAction (Delete taskId)   = deleteTask taskId
+executeAction _                 = id
 
 -----------------------------------------------------------------------------------
 
@@ -83,58 +88,72 @@ defaultOptions = Options
 	, file    = "todo.txt"
 	}
 
-options :: [ OptDescr (Options -> Options)]
-options =
+optionsDescription :: [ OptDescr (Options -> Options)]
+optionsDescription =
 	[ Option "vV" 	["version"] 
-		(NoArg $ \opts -> opts {version = True})
+		(NoArg $ \options -> options {version = True})
 		"Show the version of th"
 
 	, Option "hH" 	["help"] 
-		(NoArg $ \opts -> opts {help = True})
+		(NoArg $ \options -> options {help = True})
 		"Show help for th"
 
 	, Option "c"	["create"] 	
-		(ReqArg  (\ arg opts -> opts {action = Create arg}) "TASKNAME")
+		(ReqArg  (\ arg options -> options {action = Create arg}) "TASKNAME")
 		"Create a new task"
 	
 	, Option "s"	["start"] 	
-		(ReqArg  (\ arg opts -> opts {action = Start $ read arg}) "TASKID")
+		(ReqArg  (\ arg options -> options {action = Start $ read arg}) "TASKID")
 		"Mark task as started"
 
 	, Option "f"	["finish"] 	
-		(ReqArg  (\ arg opts -> opts {action = Finish $ read arg}) "TASKID")
+		(ReqArg  (\ arg options -> options {action = Finish $ read arg}) "TASKID")
 		"Mark task as finished"
 
 	, Option "d"	["delete"] 	
-		(ReqArg  (\ arg opts -> opts {action = Delete $ read arg}) "TASKID")
+		(ReqArg  (\ arg options -> options {action = Delete $ read arg}) "TASKID")
 		"Delete task"
 
 	, Option "l" ["list"]
-		(ReqArg  (\ arg opts -> opts {file = arg}) "FILENAME")
+		(ReqArg  (\ arg options -> options {file = arg}) "FILENAME")
 		"Use this file as the task list"
 	]
 
 parseOptions :: [String] -> Either String Options
-parseOptions argv = case getOpt Permute options argv of
-		(o, n, []  ) 	-> Right (foldl (flip id) defaultOptions o)
-		(_, _, errors) 	-> Left $ concat errors ++ usageInfo header options
-	where header = "\n\nUsage: th [OPTION...]"
+parseOptions argv = case getOpt Permute optionsDescription argv of
+		(o, _, []  ) 	-> Right (foldl (flip id) defaultOptions o)
+		(_, _, errors) 	-> Left $ (++) (concat errors) (showUsage optionsDescription)
+
+processOptions :: Options -> Either String Options
+processOptions (Options {help = True}) 		= Left $ showUsage optionsDescription
+processOptions (Options {version   = True}) = Left _version
+processOptions options                		= Right options
+
+showUsage :: [ OptDescr (Options -> Options)] -> String
+showUsage = usageInfo "\n\nUsage: th [OPTION...]"
 
 -------------------------------------------------------------------------------
 
-processResult :: Options -> Maybe TaskList -> IO ()
-processResult options Nothing      = putStrLn $ "Error parsing" ++ file options
-processResult options (Just tasks) = print tasks >> writeFile (file options) (show tasks)
+parseIfExists :: String -> IO (Either String TaskList)
+parseIfExists filename = do 
+	b <- doesFileExist filename
+	if' b (parseTaskList <$> readFile filename) (return $ Right H.empty)
 
-parseIfExists :: String -> IO (Maybe TaskList)
-parseIfExists filename = doesFileExist filename >> parseTaskList <$> readFile filename
+processResult :: Options -> TaskList -> IO TaskList
+processResult options tasks = writeFile (file options) (show tasks) >> return tasks
 
+printTaskList :: TaskList -> IO ()
+printTaskList = putStrLn . H.foldWithKey (\k v xs -> "\n" ++ show k ++ " - " ++ show v ++ xs) ""
 
 main :: IO ()
 main = do
 	args <- getArgs
-	case parseOptions args of 
-		Left str -> putStrLn str
+	case parseOptions args >>= processOptions of 
+		Left str      -> putStrLn str
 		Right options -> do
 			mTaskList <- parseIfExists $ file options
-			processResult options $ mTaskList >>= Just . executeAction (action options)
+			case mTaskList of
+				Left str -> putStrLn str
+				Right taskList -> do
+					let taskList' = executeAction (action options) taskList
+					processResult options taskList' >>= printTaskList
