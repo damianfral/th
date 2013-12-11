@@ -156,7 +156,6 @@ main = do taskOpts <- runEitherT $ do
 	              options <- parseOptions args >>= processOptions
                       task <- parseIfExists $ file options
                       return (task, options)
-
           case taskOpts of
             Left str -> putStrLn str
             Right (taskList, options) -> do
