@@ -1,4 +1,7 @@
-{-# LANGUAGE FlexibleInstances, TypeSynonymInstances, OverlappingInstances #-}
+{-# LANGUAGE FlexibleInstances
+  , TypeSynonymInstances
+  , OverlappingInstances
+  , RecordWildCards #-}
 
 module Main where
 
@@ -6,8 +9,9 @@ import System.Console.GetOpt
 import System.Environment
 import System.Directory
 import Control.Monad
-import Control.Applicative
-import Data.Either()
+-- import Control.Applicative
+import Control.Monad.Trans.Class
+import Control.Monad.Trans.Either
 import qualified Data.IntMap as H
 
 _version :: String
@@ -30,19 +34,19 @@ instance Show Task where
 	show (Task taskState taskName) = show taskState ++ " " ++ taskName
 
 type TaskList = H.IntMap Task
-type TaskID   = H.Key 
+type TaskID   = H.Key
 
 instance Show TaskList where
 	show (xs) = H.fold (++) "" $ H.map (++ "\n") $ H.map show xs
 
-parseTask :: String -> Either String Task
-parseTask ('[':' ':']':' ':taskName) = Right $ Task NotDone  taskName
-parseTask ('[':'-':']':' ':taskName) = Right $ Task Started  taskName
-parseTask ('[':'x':']':' ':taskName) = Right $ Task Done     taskName
-parseTask str                    	 = Left  $ "Error parsing: " ++ str
+parseTask :: String -> EitherT String IO Task
+parseTask ('[':' ':']':' ':taskName) = right $ Task NotDone  taskName
+parseTask ('[':'-':']':' ':taskName) = right $ Task Started  taskName
+parseTask ('[':'x':']':' ':taskName) = right $ Task Done     taskName
+parseTask str                        = left  $ "Error parsing: " ++ str
 
-parseTaskList :: String -> Either String TaskList
-parseTaskList = mapM parseTask . filter (not . null) . lines >=> (Right . H.fromList . zip [1..])
+parseTaskList :: String -> EitherT String IO TaskList
+parseTaskList = mapM parseTask . filter (not . null) . lines >=> (right . H.fromList . zip [1..])
 
 -----------------------------------------------------------------------------------
 
@@ -81,7 +85,7 @@ data Options = Options
 	} deriving Show
 
 defaultOptions :: Options
-defaultOptions = Options 
+defaultOptions = Options
 	{ help    = False
 	, version = False
 	, action  = Print
@@ -90,27 +94,27 @@ defaultOptions = Options
 
 optionsDescription :: [ OptDescr (Options -> Options)]
 optionsDescription =
-	[ Option "vV" 	["version"] 
+	[ Option "vV" 	["version"]
 		(NoArg $ \options -> options {version = True})
 		"Show the version of th"
 
-	, Option "hH" 	["help"] 
+	, Option "hH" 	["help"]
 		(NoArg $ \options -> options {help = True})
 		"Show help for th"
 
-	, Option "c"	["create"] 	
+	, Option "c"	["create"]
 		(ReqArg  (\ arg options -> options {action = Create arg}) "TASKNAME")
 		"Create a new task"
-	
-	, Option "s"	["start"] 	
+
+	, Option "s"	["start"]
 		(ReqArg  (\ arg options -> options {action = Start $ read arg}) "TASKID")
 		"Mark task as started"
 
-	, Option "f"	["finish"] 	
+	, Option "f"	["finish"]
 		(ReqArg  (\ arg options -> options {action = Finish $ read arg}) "TASKID")
 		"Mark task as finished"
 
-	, Option "d"	["delete"] 	
+	, Option "d"	["delete"]
 		(ReqArg  (\ arg options -> options {action = Delete $ read arg}) "TASKID")
 		"Delete task"
 
@@ -119,25 +123,26 @@ optionsDescription =
 		"Use this file as the task list"
 	]
 
-parseOptions :: [String] -> Either String Options
+parseOptions :: [String] -> EitherT String IO Options
 parseOptions argv = case getOpt Permute optionsDescription argv of
-		(o, _, []  ) 	-> Right (foldl (flip id) defaultOptions o)
-		(_, _, errors) 	-> Left $ (++) (concat errors) (showUsage optionsDescription)
+		(o, _, []  ) 	-> right (foldl (flip id) defaultOptions o)
+		(_, _, errors) 	-> left $ (++) (concat errors) (showUsage optionsDescription)
 
-processOptions :: Options -> Either String Options
-processOptions (Options {help = True}) 		= Left $ showUsage optionsDescription
-processOptions (Options {version   = True}) = Left _version
-processOptions options                		= Right options
+processOptions :: Options -> EitherT String IO Options
+processOptions o@(Options {..}) | help      = left $ showUsage optionsDescription
+                                | version   = left _version
+                                | otherwise = right o
 
 showUsage :: [ OptDescr (Options -> Options)] -> String
 showUsage = usageInfo "\n\nUsage: th [OPTION...]"
 
 -------------------------------------------------------------------------------
 
-parseIfExists :: String -> IO (Either String TaskList)
-parseIfExists filename = do 
-	b <- doesFileExist filename
-	if' b (parseTaskList <$> readFile filename) (return $ Right H.empty)
+parseIfExists :: String -> EitherT String IO TaskList
+parseIfExists filename = do
+	b <- lift $ doesFileExist filename
+        fl <- lift $ readFile filename
+	if' b (parseTaskList fl) (right H.empty)
 
 processResult :: Options -> TaskList -> IO TaskList
 processResult options tasks = writeFile (file options) (show tasks) >> return tasks
@@ -146,14 +151,14 @@ printTaskList :: TaskList -> IO ()
 printTaskList = putStrLn . H.foldWithKey (\k v xs -> "\n" ++ show k ++ " - " ++ show v ++ xs) ""
 
 main :: IO ()
-main = do
-	args <- getArgs
-	case parseOptions args >>= processOptions of 
-		Left str      -> putStrLn str
-		Right options -> do
-			mTaskList <- parseIfExists $ file options
-			case mTaskList of
-				Left str -> putStrLn str
-				Right taskList -> do
-					let taskList' = executeAction (action options) taskList
-					processResult options taskList' >>= printTaskList
+main = do taskOpts <- runEitherT $ do
+	              args <- lift getArgs
+	              options <- parseOptions args >>= processOptions
+                      task <- parseIfExists $ file options
+                      return (task, options)
+
+          case taskOpts of
+            Left str -> putStrLn str
+            Right (taskList, options) -> do
+			            let taskList' = executeAction (action options) taskList
+			            processResult options taskList' >>= printTaskList
