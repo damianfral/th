@@ -16,4 +16,4 @@ executable th
     main-is       : th.hs
     build-depends :
                   directory, containers, base == 4.6.*,
-                  either, transformers, Cabal >= 1.18
+                  extensible-effects == 1.2.*
