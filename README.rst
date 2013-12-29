@@ -34,21 +34,21 @@ You can execute ``th -h`` to show the usage information::
 
 By default, if you don't specify a file with ``--list``, ``th`` will use ``todo.txt``.
 
-Each task can be in one of these 3 states: not done, started, finish.
+Each task can be in one of these 3 states: *not done*, *started*, *finish*.
 
 Create tasks
 ++++++++++++
 
 ::
 
-	> th -c "Release version v0.2"
+	> th -c "Release version v1.6"
 
-	1 - [ ] Release version v0.2
+	1 - [ ] Release version v1.6
 
 
 	> th -c "Review open issues"
 
-	1 - [ ] Release version v0.2
+	1 - [ ] Release version v1.6
 	2 - [ ] Review open issues
 
 Start/Finish a task
@@ -58,12 +58,12 @@ Start/Finish a task
 
 	> th -s 1
 
-	1 - [-] Release version v0.2
+	1 - [-] Release version v1.6
 	2 - [ ] Review open issues
 
 	> th -f 1
 
-	1 - [x] Release version v0.2
+	1 - [x] Release version v1.6
 	2 - [ ] Review open issues
 
 Delete a task
