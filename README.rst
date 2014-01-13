@@ -1,7 +1,3 @@
-----
-title:  A command-line todo list manager written in Haskell
-----
-
 th
 ==
 
