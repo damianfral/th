@@ -10,10 +10,13 @@ license-file   : LICENSE
 author         : damianfral
 maintainer     : huevofritopamojarpan@gmail.com
 build-type     : Simple
-cabal-version  : >=1.8
+cabal-version  : >=1.10
 
 executable th
-    main-is       : th.hs
-    build-depends :
+    main-is          : th.hs
+    build-depends    : 
                   directory, containers, base == 4.6.*,
                   extensible-effects == 1.2.*
+    hs-source-dirs   : src
+    ghc-options      : -Wall -O2 -threaded
+    default-language : Haskell2010
