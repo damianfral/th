@@ -9,14 +9,14 @@ module Main where
 import System.Console.GetOpt
 import System.Environment
 import System.Directory
+import Data.Functor
 import Control.Monad
-import Control.Eff
-import Control.Eff.Lift
-import Control.Eff.Exception
+import Control.Monad.Error
+
 import qualified Data.IntMap as H
 
 _version :: String
-_version = "v0.3"
+_version = "v0.4"
 
 if' :: Bool -> a -> a -> a
 if' True x _  = x
@@ -38,18 +38,20 @@ type TaskList = H.IntMap Task
 type TaskID   = H.Key
 
 instance Show TaskList where
-	show (xs) = H.fold (++) "" $ H.map (++ "\n") $ H.map show xs
+	show = H.fold (++) "" . H.map (++ "\n") . H.map show
 
-parseTask :: (Member (Exc String) r) => String -> Eff r Task
-parseTask ('[':' ':']':' ':taskName) = return   $ Task NotDone  taskName
-parseTask ('[':'-':']':' ':taskName) = return   $ Task Started  taskName
-parseTask ('[':'x':']':' ':taskName) = return   $ Task Done     taskName
-parseTask str                        = throwExc $ "Error parsing: " ++ str
+type ExcMonad = ErrorT String IO
 
-parseTaskList :: (Member (Exc String) r) => String -> Eff r TaskList
+parseTask :: String -> ExcMonad Task
+parseTask ('[':' ':']':' ':taskName) = return $ Task NotDone  taskName
+parseTask ('[':'-':']':' ':taskName) = return $ Task Started  taskName
+parseTask ('[':'x':']':' ':taskName) = return $ Task Done     taskName
+parseTask str                        = throwError $ "Error parsing: " ++ str
+
+parseTaskList :: String -> ExcMonad TaskList
 parseTaskList = mapM parseTask . filter (not . null) . lines >=> (return . H.fromList . zip [1..])
 
------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 findIndex' :: H.IntMap a -> H.Key
 findIndex' xs = if H.null xs then 1 else (+) 1 $ fst $ H.findMax xs
@@ -58,14 +60,14 @@ createTask ::  String -> TaskList -> TaskList
 createTask taskName list = H.insert (findIndex' list) (Task NotDone taskName) list
 
 markTask :: TaskState -> H.Key -> TaskList -> TaskList
-markTask s = H.update $ \ task -> Just task {state = s}
+markTask s = H.update $ \ task -> return task {state = s}
 
 startTask, finishTask, deleteTask :: H.Key -> TaskList -> TaskList
 startTask  = markTask Started
 finishTask = markTask Done
 deleteTask = H.update $ const Nothing
 
------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 data Action = Create String | Start TaskID | Finish TaskID | Delete TaskID | Print deriving Show
 
@@ -76,7 +78,7 @@ executeAction (Finish taskId)   = finishTask taskId
 executeAction (Delete taskId)   = deleteTask taskId
 executeAction _                 = id
 
------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 data Options = Options
 	{ help    :: Bool
@@ -124,40 +126,40 @@ optionsDescription =
 		"Use this file as the task list [todo.txt]"
 	]
 
-parseOptions :: (Member (Exc String) r) => [String] -> Eff r Options
+parseOptions :: [String] -> ExcMonad Options
 parseOptions argv = case getOpt Permute optionsDescription argv of
 		(o, _, []  )   -> return   $ foldl (flip id) defaultOptions o
-		(_, _, errors) -> throwExc $ concat errors ++ showUsage optionsDescription
+		(_, _, errors) -> throwError $ concat errors ++ showUsage optionsDescription
 
-processOptions :: (Member (Exc String) r) => Options -> Eff r Options
-processOptions o@(Options {..}) | help      = throwExc $ showUsage optionsDescription
-								| version   = throwExc _version
+processOptions :: Options -> ExcMonad Options
+processOptions o@(Options {..}) | help      = throwError $ showUsage optionsDescription
+								| version   = throwError _version
 								| otherwise = return o
 
 showUsage :: [ OptDescr (Options -> Options)] -> String
 showUsage = usageInfo "\n\nUsage: th [OPTION...]"
 
--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
-parseIfExists :: (SetMember Lift (Lift IO) r, Member (Exc String) r) => String -> Eff r TaskList
-parseIfExists filename = do
-	b  <- lift $ doesFileExist filename
-	fl <- lift $ readFile filename
-	if' b (parseTaskList fl) (return H.empty)
+parseIfExists ::  String -> ExcMonad TaskList
+parseIfExists filename = (lift $ doesFileExist filename) >>= \b ->
+	if b then lift (readFile filename) >>= parseTaskList
+	else return H.empty
 
-processResult :: Options -> TaskList -> IO TaskList
-processResult options tasks = writeFile (file options) (show tasks) >> return tasks
+saveTaskList :: Options -> TaskList -> IO TaskList
+saveTaskList options tasks = writeFile (file options) (show tasks) >> return tasks
 
-printTaskList :: TaskList -> IO ()
-printTaskList = putStrLn . H.foldWithKey (\k v xs -> "\n" ++ show k ++ " - " ++ show v ++ xs) ""
+showTaskList :: TaskList -> String
+showTaskList = H.foldWithKey (\k v xs -> "\n" ++ show k ++ " - " ++ show v ++ xs) ""
 
-helper :: (SetMember Lift (Lift IO) r, Member (Exc String) r) => Eff r ()
-helper = do
-	args 	<- lift getArgs
-	options <- parseOptions args >>= processOptions
-	task    <- parseIfExists $ file options
-	let taskList' = executeAction (action options) task
-	lift $ processResult options taskList' >>= printTaskList
+helper :: ExcMonad TaskList
+helper = lift getArgs >>= parseOptions >>= processOptions >>= \options ->
+	(executeAction (action options)) <$> (parseIfExists (file options))
+	>>= lift . saveTaskList options
+
+reportResult :: Either String TaskList -> IO ()
+reportResult (Left str)       = putStrLn str
+reportResult (Right taskList) = print taskList
 
 main :: IO ()
-main = void $ runLift ((runExc $ catchExc helper (lift . putStrLn)):: (SetMember Lift (Lift IO) r) => Eff r (Either String ()))
+main = runErrorT helper >>= reportResult

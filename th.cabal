@@ -2,7 +2,7 @@
 -- see http://haskell.org/cabal/users-guide/
 
 name           : th
-version        : 0.3
+version        : 0.4
 synopsis       : A command-line todo list manager in the style of http://stevelosh.com/projects/t/ written in Haskell.
 homepage       : https://github.com/damianfral/th
 license        : OtherLicense
@@ -14,9 +14,9 @@ cabal-version  : >=1.10
 
 executable th
     main-is          : th.hs
-    build-depends    : 
+    build-depends    :
                   directory, containers, base == 4.6.*,
-                  extensible-effects == 1.2.*
+                  mtl == 2.*
     hs-source-dirs   : src
     ghc-options      : -Wall -O2 -threaded
     default-language : Haskell2010
