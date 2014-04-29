@@ -40,7 +40,7 @@ You can execute ``th -h`` to show the usage information::
 
 By default, if you don't specify a file with ``--list``, th will use ``todo.txt``.
 
-Each task can be in one of these 3 states: *not done*, *started*, *finish*.
+Each task can be in one of these 3 states: *not done*, *started*, *finished*.
 
 
 Create tasks
