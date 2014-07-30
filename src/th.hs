@@ -1,22 +1,22 @@
 {-# LANGUAGE FlexibleInstances
   , FlexibleContexts
   , TypeSynonymInstances
-  , OverlappingInstances
-  , RecordWildCards #-}
+  , OverlappingInstances #-}
 
 module Main where
 
-import System.Console.GetOpt
-import System.Environment
-import System.Directory
-import Data.Functor
+import Control.Applicative
 import Control.Monad
-import Control.Monad.Error
+import Control.Monad.Except
+import Data.List
+import Data.Monoid
+import Options.Applicative
+import System.Directory
 
 import qualified Data.IntMap as H
 
-_version :: String
-_version = "v0.4"
+version :: String
+version = "v0.4"
 
 if' :: Bool -> a -> a -> a
 if' True x _  = x
@@ -40,13 +40,11 @@ type TaskID   = H.Key
 instance Show TaskList where
 	show = H.fold (++) "" . H.map (++ "\n") . H.map show
 
-type ExcMonad = ErrorT String IO
-
 parseTask :: String -> ExcMonad Task
 parseTask ('[':' ':']':' ':taskName) = return $ Task NotDone  taskName
 parseTask ('[':'-':']':' ':taskName) = return $ Task Started  taskName
 parseTask ('[':'x':']':' ':taskName) = return $ Task Done     taskName
-parseTask str                        = throwError $ "Error parsing: " ++ str
+parseTask err                        = throwError $ "Error parsing: " ++ err
 
 parseTaskList :: String -> ExcMonad TaskList
 parseTaskList = mapM parseTask . filter (not . null) . lines >=> (return . H.fromList . zip [1..])
@@ -69,97 +67,80 @@ deleteTask = H.update $ const Nothing
 
 --------------------------------------------------------------------------------
 
-data Action = Create String | Start TaskID | Finish TaskID | Delete TaskID | Print deriving Show
+data Command  = Create String | Start TaskID | Finish TaskID | Delete TaskID | Print deriving Show
 
-executeAction :: Action -> TaskList -> TaskList
-executeAction (Create taskName) = createTask taskName
-executeAction (Start  taskId)   = startTask taskId
-executeAction (Finish taskId)   = finishTask taskId
-executeAction (Delete taskId)   = deleteTask taskId
-executeAction _                 = id
+executeCommand :: Command -> TaskList -> TaskList
+executeCommand (Create taskName) = createTask taskName
+executeCommand (Start  taskId)   = startTask taskId
+executeCommand (Finish taskId)   = finishTask taskId
+executeCommand (Delete taskId)   = deleteTask taskId
+executeCommand _                 = id
 
---------------------------------------------------------------------------------
+withInfo :: Parser a -> String -> ParserInfo a
+withInfo opts desc = info (helper <*> opts) $ progDesc desc
+
+argParser :: Parser Int
+argParser = read <$> argument str (metavar "TASKID")
+
+parseCreate, parseStart, parseFinish, parseDelete :: Parser Command
+parseCreate  = Create . mconcat . intersperse " " <$> many (argument str (metavar "TASK DESCRIPTION"))
+parseStart   = Start  <$> argParser
+parseFinish  = Finish <$> argParser
+parseDelete  = Delete <$> argParser
+
+abrevs :: String -> [String]
+abrevs x = map (`take` x) [1..length x ]
+
+multicommand :: String -> ParserInfo a -> Mod CommandFields a
+multicommand c p = mconcat $ map (`command` p) (abrevs c)
+
+parseCommand :: Parser Command
+parseCommand = subparser (mconcat commands) <|> pure Print
+    where commands = [ multicommand "create" (parseCreate `withInfo` "Create a new task")
+                     , multicommand "start"  (parseStart  `withInfo` "Start a task")
+                     , multicommand "finish" (parseFinish `withInfo` "Finish a task")
+                     , multicommand "delete" (parseDelete `withInfo` "Delete a task") ]
 
 data Options = Options
-	{ help    :: Bool
-	, version :: Bool
-	, action  :: Action
-	, file    :: String
-	} deriving Show
+    { _version :: Bool
+    , _file    :: String
+    , _command :: Command
+    } deriving Show
 
-defaultOptions :: Options
-defaultOptions = Options
-	{ help    = False
-	, version = False
-	, action  = Print
-	, file    = "todo.txt"
-	}
+parseVersion :: Parser Bool
+parseVersion = switch $ mconcat [long "version", short 'v', help "Show version"]
 
-optionsDescription :: [ OptDescr (Options -> Options)]
-optionsDescription =
-	[ Option "vV"   ["version"]
-		(NoArg $ \options -> options {version = True})
-		"Show the version of th"
+parseFile :: Parser String
+parseFile = strOption $ mconcat
+    [long "file", short 'f', value "todo.txt", help "Specify filename [default = todo.txt]"]
 
-	, Option "hH"   ["help"]
-		(NoArg $ \options -> options {help = True})
-		"Show help for th"
 
-	, Option "c"    ["create"]
-		(ReqArg  (\ arg options -> options {action = Create arg}) "TASKNAME")
-		"Create a new task"
-
-	, Option "s"    ["start"]
-		(ReqArg  (\ arg options -> options {action = Start $ read arg}) "TASKID")
-		"Mark task as started"
-
-	, Option "f"    ["finish"]
-		(ReqArg  (\ arg options -> options {action = Finish $ read arg}) "TASKID")
-		"Mark task as finished"
-
-	, Option "d"    ["delete"]
-		(ReqArg  (\ arg options -> options {action = Delete $ read arg}) "TASKID")
-		"Delete task"
-
-	, Option "l" ["list"]
-		(ReqArg  (\ arg options -> options {file = arg}) "FILENAME")
-		"Use this file as the task list [todo.txt]"
-	]
-
-parseOptions :: [String] -> ExcMonad Options
-parseOptions argv = case getOpt Permute optionsDescription argv of
-		(o, _, []  )   -> return   $ foldl (flip id) defaultOptions o
-		(_, _, errors) -> throwError $ concat errors ++ showUsage optionsDescription
-
-processOptions :: Options -> ExcMonad Options
-processOptions o@(Options {..}) | help      = throwError $ showUsage optionsDescription
-								| version   = throwError _version
-								| otherwise = return o
-
-showUsage :: [ OptDescr (Options -> Options)] -> String
-showUsage = usageInfo "\n\nUsage: th [OPTION...]"
+parseOptions :: Parser Options
+parseOptions = Options <$> parseVersion <*> parseFile <*> parseCommand
 
 --------------------------------------------------------------------------------
 
+type ExcMonad = ExceptT String IO
+
 parseIfExists ::  String -> ExcMonad TaskList
-parseIfExists filename = (lift $ doesFileExist filename) >>= \b ->
+parseIfExists filename = lift (doesFileExist filename) >>= \b ->
 	if b then lift (readFile filename) >>= parseTaskList
-	else return H.empty
+  else return H.empty
 
 saveTaskList :: Options -> TaskList -> IO TaskList
-saveTaskList options tasks = writeFile (file options) (show tasks) >> return tasks
+saveTaskList options tasks = writeFile (_file options) (show tasks) >> return tasks
 
 showTaskList :: TaskList -> String
 showTaskList = H.foldWithKey (\k v xs -> "\n" ++ show k ++ " - " ++ show v ++ xs) ""
 
-helper :: ExcMonad TaskList
-helper = lift getArgs >>= parseOptions >>= processOptions >>= \options ->
-	(executeAction (action options)) <$> (parseIfExists (file options))
-	>>= lift . saveTaskList options
+processOptions :: Options -> ExcMonad TaskList
+processOptions (Options True _ _) = throwError version
+processOptions options = executeCommand (_command options) <$> parseIfExists (_file options) >>= lift . saveTaskList options
 
 reportResult :: Either String TaskList -> IO ()
-reportResult (Left str)       = putStrLn str
+reportResult (Left l)       = putStrLn l
 reportResult (Right taskList) = print taskList
 
 main :: IO ()
-main = runErrorT helper >>= reportResult
+main = execParser parseOptions' >>= runExceptT . processOptions >>= reportResult
+  where parseOptions' = parseOptions `withInfo` "A todo list manager written in Haskell"
