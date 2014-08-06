@@ -2,7 +2,7 @@
 -- see http://haskell.org/cabal/users-guide/
 
 name           : th
-version        : 0.4
+version        : 0.5
 synopsis       : A command-line todo list manager in the style of http://stevelosh.com/projects/t/ written in Haskell.
 homepage       : https://github.com/damianfral/th
 license        : OtherLicense

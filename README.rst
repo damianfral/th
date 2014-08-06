@@ -28,17 +28,19 @@ Using th
 You can execute ``th -h`` to show the usage information::
 
 	th -h
+	Usage: th [-v|--version] [-f|--file ARG] [COMMAND]
+	A todo list manager written in Haskell
 
-	Usage: th [OPTION...]
-	  -v, -V       --version          Show the version of th
-	  -h, -H       --help             Show help for th
-	  -c TASKNAME  --create=TASKNAME  Create a new task
-	  -s TASKID    --start=TASKID     Mark task as started
-	  -f TASKID    --finish=TASKID    Mark task as finished
-	  -d TASKID    --delete=TASKID    Delete task
-	  -l FILENAME  --list=FILENAME    Use this file as the task list
+	Available options:
+	-h,--help                Show this help text
+	-v,--version             Show version
+	-f,--file ARG            Specify filename [default = todo.txt]
 
-By default, if you don't specify a file with ``--list``, th will use ``todo.txt``.
+	Available commands:
+	create                   Create a new task
+	start                    Start a task
+	finish                   Finish a task
+	delete                   Delete a task
 
 Each task can be in one of these 3 states: *not done*, *started*, *finished*.
 
@@ -47,13 +49,13 @@ Create tasks
 ++++++++++++
 
 ::
-
-	> th -c "Release version v1.6"
+			
+	> th create "Release version v1.6"
 
 	1 - [ ] Release version v1.6
 
 
-	> th -c "Review open issues"
+	> th create "Review open issues"
 
 	1 - [ ] Release version v1.6
 	2 - [ ] Review open issues
@@ -64,12 +66,12 @@ Start/Finish a task
 
 ::
 
-	> th -s 1
+	> th start 1
 
 	1 - [-] Release version v1.6
 	2 - [ ] Review open issues
 
-	> th -f 1
+	> th finish 1
 
 	1 - [x] Release version v1.6
 	2 - [ ] Review open issues
@@ -80,7 +82,7 @@ Delete a task
 
 ::
 
-	> th -d 1
+	> th delete 1
 
 	1 - [ ] Review open issues
 
@@ -94,6 +96,12 @@ Show tasks
 
 	1 - [ ] Review open issues
 
+Autocompletion
+--------------
+
+::
+
+	> th --bash-completion-script `which th`
 
 
 .. _`Haskell Platform`: http://www.haskell.org/platform/index.html

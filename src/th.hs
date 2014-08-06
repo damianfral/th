@@ -16,7 +16,7 @@ import System.Directory
 import qualified Data.IntMap as H
 
 version :: String
-version = "v0.4"
+version = "v0.5"
 
 if' :: Bool -> a -> a -> a
 if' True x _  = x
@@ -25,20 +25,20 @@ if' False _ y = y
 data TaskState = NotDone | Started | Done deriving (Eq)
 
 instance Show TaskState where
-	show NotDone = "[ ]"
-	show Started = "[-]"
-	show Done    = "[x]"
+    show NotDone = "[ ]"
+    show Started = "[-]"
+    show Done    = "[x]"
 
 data Task = Task {state :: TaskState, name :: String} deriving (Eq)
 
 instance Show Task where
-	show (Task taskState taskName) = show taskState ++ " " ++ taskName
+	  show (Task taskState taskName) = show taskState ++ " " ++ taskName
 
 type TaskList = H.IntMap Task
 type TaskID   = H.Key
 
 instance Show TaskList where
-	show = H.fold (++) "" . H.map (++ "\n") . H.map show
+	  show = H.fold (++) "" . H.map (++ "\n") . H.map show
 
 parseTask :: String -> ExcMonad Task
 parseTask ('[':' ':']':' ':taskName) = return $ Task NotDone  taskName
@@ -91,15 +91,12 @@ parseDelete  = Delete <$> argParser
 abrevs :: String -> [String]
 abrevs x = map (`take` x) [1..length x ]
 
-multicommand :: String -> ParserInfo a -> Mod CommandFields a
-multicommand c p = mconcat $ map (`command` p) (abrevs c)
-
 parseCommand :: Parser Command
 parseCommand = subparser (mconcat commands) <|> pure Print
-    where commands = [ multicommand "create" (parseCreate `withInfo` "Create a new task")
-                     , multicommand "start"  (parseStart  `withInfo` "Start a task")
-                     , multicommand "finish" (parseFinish `withInfo` "Finish a task")
-                     , multicommand "delete" (parseDelete `withInfo` "Delete a task") ]
+    where commands = [ command "create" (parseCreate `withInfo` "Create a new task")
+                     , command "start"  (parseStart  `withInfo` "Start a task")
+                     , command "finish" (parseFinish `withInfo` "Finish a task")
+                     , command "delete" (parseDelete `withInfo` "Delete a task") ]
 
 data Options = Options
     { _version :: Bool
@@ -114,7 +111,6 @@ parseFile :: Parser String
 parseFile = strOption $ mconcat
     [long "file", short 'f', value "todo.txt", help "Specify filename [default = todo.txt]"]
 
-
 parseOptions :: Parser Options
 parseOptions = Options <$> parseVersion <*> parseFile <*> parseCommand
 
@@ -124,8 +120,8 @@ type ExcMonad = ExceptT String IO
 
 parseIfExists ::  String -> ExcMonad TaskList
 parseIfExists filename = lift (doesFileExist filename) >>= \b ->
-	if b then lift (readFile filename) >>= parseTaskList
-  else return H.empty
+    if b then lift (readFile filename) >>= parseTaskList
+    else return H.empty
 
 saveTaskList :: Options -> TaskList -> IO TaskList
 saveTaskList options tasks = writeFile (_file options) (show tasks) >> return tasks
@@ -138,9 +134,9 @@ processOptions (Options True _ _) = throwError version
 processOptions options = executeCommand (_command options) <$> parseIfExists (_file options) >>= lift . saveTaskList options
 
 reportResult :: Either String TaskList -> IO ()
-reportResult (Left l)       = putStrLn l
+reportResult (Left l)         = putStrLn l
 reportResult (Right taskList) = print taskList
 
 main :: IO ()
 main = execParser parseOptions' >>= runExceptT . processOptions >>= reportResult
-  where parseOptions' = parseOptions `withInfo` "A todo list manager written in Haskell"
+    where parseOptions' = parseOptions `withInfo` "A todo list manager written in Haskell"
